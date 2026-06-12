@@ -268,25 +268,32 @@ st.divider()
 
 # ── Sidebar ───────────────────────────────────────────────────────────────
 with st.sidebar:
-    st.header("🔑 API Key")
     import os
-    default_key = ""
+    # Try secrets first (Streamlit Cloud), then environment variable
+    api_key = ""
+    key_from_secrets = False
     try:
-        default_key = st.secrets["ANTHROPIC_API_KEY"]
+        api_key = st.secrets["ANTHROPIC_API_KEY"]
+        key_from_secrets = True
     except Exception:
-        default_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        if api_key:
+            key_from_secrets = True
 
-    api_key = st.text_input(
-        "Anthropic API Key",
-        value=default_key,
-        type="password",
-        placeholder="sk-ant-...",
-        help="Required to answer questions. Get yours at console.anthropic.com",
-    )
-    if not api_key:
-        st.warning("Enter your Anthropic API key to enable Q&A.")
+    if key_from_secrets:
+        # Key is pre-configured — show nothing, just a quiet status
+        st.success("🔑 API key configured")
     else:
-        st.success("API key set ✓")
+        # No key found — let user paste one manually
+        st.header("🔑 API Key")
+        api_key = st.text_input(
+            "Anthropic API Key",
+            type="password",
+            placeholder="sk-ant-...",
+            help="Required to answer questions. Get yours at console.anthropic.com",
+        )
+        if not api_key:
+            st.warning("Enter your Anthropic API key to enable Q&A.")
 
     st.divider()
     st.header("Index Management")
