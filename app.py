@@ -3,13 +3,9 @@ from pathlib import Path
 
 import streamlit as st
 import streamlit.components.v1 as components
-from langchain_chroma import Chroma
-from langchain_huggingface import HuggingFaceEmbeddings
 
-from rag.indexer import build_index, chunk_document, clear_index, index_exists
+from rag.indexer import build_index, chunk_document
 from rag.retriever import get_answer
-
-PERSIST_DIR = "chroma_db"
 
 st.set_page_config(page_title="RAG PDF Q&A", layout="wide")
 st.title("PDF Question & Answer")
@@ -49,9 +45,9 @@ def _rag_diagram(query_active: bool = False) -> str:
         arrow(idx_arrow) +
         node("#fef3c7", "✂️", "Chunking",   "1000-char splits") +
         arrow(idx_arrow) +
-        node("#ede9fe", "🔢", "Embed",      "Ollama nomic") +
+        node("#ede9fe", "🔢", "Embed",      "all-MiniLM-L6") +
         arrow(idx_arrow) +
-        node("#d1fae5", "💾", "ChromaDB",   "Persisted vectors",
+        node("#d1fae5", "⚡", "FAISS",      "In-memory vectors",
              "border:2px solid #34d399;")
     )
 
@@ -59,22 +55,22 @@ def _rag_diagram(query_active: bool = False) -> str:
     q_nodes = (
         node("#fce7f3", "❓", "Your Query",    "Natural language",  q_node_style) +
         arrow(q_arrow) +
-        node("#ede9fe", "🔢", "Embed Query",   "nomic-embed",       q_node_style) +
+        node("#ede9fe", "🔢", "Embed Query",   "all-MiniLM-L6",     q_node_style) +
         arrow(q_arrow) +
-        node("#d1fae5", "🔍", "ChromaDB",      "Cosine similarity", "border:2px solid #34d399;" + q_glow + pulse_style) +
+        node("#d1fae5", "🔍", "FAISS",         "L2 similarity",     "border:2px solid #34d399;" + q_glow + pulse_style) +
         arrow(q_arrow) +
         node("#fef9c3", "📋", "Top-4 Chunks",  "Closest matches",   q_node_style) +
         arrow(q_arrow) +
-        node("#fee2e2", "🤖", "Qwen 2.5:7b",   "LLM reasoning",     q_node_style) +
+        node("#fee2e2", "🤖", "Claude Haiku",  "LLM reasoning",     q_node_style) +
         arrow(q_arrow) +
-        node("#dcfce7", "💬", "Answer",         "Final response", q_node_style)
+        node("#dcfce7", "💬", "Answer",         "Final response",   q_node_style)
     )
 
     shared_note = """
       <div style="display:flex;align-items:center;gap:6px;
                   font-size:10px;color:#065f46;margin:0 0 0 134px;padding-left:14px;">
         <span style="font-size:13px;">↕</span>
-        <span>ChromaDB is the same store — built during indexing, queried at search time</span>
+        <span>FAISS is the same store — built during indexing, queried at search time</span>
       </div>"""
 
     return f"""
@@ -200,7 +196,7 @@ def _langchain_explainer() -> str:
 """ + card("🔢", "Embeddings",
            "Convert text into high-dimensional numeric vectors. Semantically similar text lands close together in vector space.",
            "#f5f3ff", "#ddd6fe") + """
-""" + card("💾", "Vector Stores",
+""" + card("⚡", "Vector Stores",
            "Databases that store and index embedding vectors. Similarity search returns the nearest neighbours to a query vector.",
            "#f0fdf4", "#bbf7d0") + """
 """ + card("⛓️", "Chains",
@@ -218,7 +214,7 @@ def _langchain_explainer() -> str:
             "Pre-built chains and agents: RetrievalQA, ConversationalRetrievalChain, SQL Agent, etc.",
             "#fdf4ff", "#c084fc") + \
       layer("🔌", "langchain-community / partner packages",
-            "Integrations: OpenAI, Anthropic, ChromaDB, Pinecone, HuggingFace, AWS, and 300+ others — each a separate pip package.",
+            "Integrations: OpenAI, Anthropic, FAISS, Pinecone, HuggingFace, AWS, and 300+ others — each a separate pip package.",
             "#f0fdf4", "#4ade80") + \
       layer("🛠️", "LangSmith (optional)",
             "Observability platform for tracing, evaluating, and debugging chains in production.",
@@ -245,20 +241,20 @@ def _langchain_explainer() -> str:
         <tbody>
 """ + this_app_row("Load PDF", "PyPDFLoader", "Reads each PDF page into a Document object") + \
       this_app_row("Split text", "RecursiveCharacterTextSplitter", "Splits into 1000-char chunks, 200-char overlap") + \
-      this_app_row("Embed chunks", "OllamaEmbeddings (nomic-embed-text)", "Converts each chunk to 768-dim vectors via local Ollama") + \
-      this_app_row("Store vectors", "Chroma (langchain-chroma)", "Persists vectors in ChromaDB on disk") + \
-      this_app_row("Retrieve", "ChromaDB retriever (k=4)", "Cosine similarity search, returns top-4 chunks") + \
-      this_app_row("Answer", "RetrievalQA chain + Qwen 2.5:7b", "Stuffs chunks into prompt, calls Qwen via Ollama for reasoning") + """
+      this_app_row("Embed chunks", "HuggingFaceEmbeddings (all-MiniLM-L6-v2)", "Converts each chunk to 384-dim vectors, runs locally") + \
+      this_app_row("Store vectors", "FAISS (langchain-community)", "Holds vectors in memory for the session") + \
+      this_app_row("Retrieve", "FAISS retriever (k=4)", "L2 similarity search, returns top-4 chunks") + \
+      this_app_row("Answer", "RetrievalQA chain + Claude Haiku", "Stuffs chunks into prompt, calls Claude via Anthropic API") + """
         </tbody>
       </table>
 
       <div style="margin-top:16px;font-size:10px;color:#9ca3af;text-align:center;">
-        LangChain v0.3 · langchain-chroma 1.1 · langchain-openai 1.2 · ChromaDB 1.5
+        LangChain v0.3 · langchain-community · FAISS · Claude Haiku (Anthropic)
       </div>
     </div>"""
 
 
-# ── Tabs: How RAG Works | What is LangChain ──────────────────────────────
+# ── Tabs ──────────────────────────────────────────────────────────────────
 tab_rag, tab_lc = st.tabs(["📊 How RAG Works", "🦜 What is LangChain?"])
 
 with tab_rag:
@@ -270,11 +266,10 @@ with tab_lc:
 
 st.divider()
 
-# ── Sidebar: Index Management ─────────────────────────────────────────────
+# ── Sidebar ───────────────────────────────────────────────────────────────
 with st.sidebar:
     st.header("🔑 API Key")
-    import os, streamlit as _st
-    # Read from Streamlit secrets (cloud) or let user paste it manually
+    import os
     default_key = ""
     try:
         default_key = st.secrets["ANTHROPIC_API_KEY"]
@@ -300,10 +295,7 @@ with st.sidebar:
         "Upload PDF files", type="pdf", accept_multiple_files=True
     )
 
-    mode = st.radio(
-        "Index mode",
-        options=["Add to index", "Replace index"],
-    )
+    mode = st.radio("Index mode", options=["Add to index", "Replace index"])
 
     if st.button("Build Index", disabled=not uploaded_files):
         with st.spinner("Indexing…"):
@@ -326,10 +318,11 @@ with st.sidebar:
                     st.warning(f"Skipped '{name}': {err}")
 
                 if valid_paths:
-                    index_mode = "replace" if mode == "Replace index" else "add"
+                    existing = None if mode == "Replace index" else st.session_state.get("vectorstore")
                     try:
-                        build_index(valid_paths, persist_dir=PERSIST_DIR, mode=index_mode)
-                        if index_mode == "replace":
+                        vs = build_index(valid_paths, existing_vectorstore=existing)
+                        st.session_state["vectorstore"] = vs
+                        if mode == "Replace index":
                             st.session_state["session_files"] = []
                         st.session_state.setdefault("session_files", []).extend(
                             Path(p).name for p in valid_paths
@@ -341,10 +334,9 @@ with st.sidebar:
 
     # Index status
     st.divider()
-    if index_exists(PERSIST_DIR):
-        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
-        vs = Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
-        chunk_count = vs._collection.count()
+    vs = st.session_state.get("vectorstore")
+    if vs is not None:
+        chunk_count = vs.index.ntotal
         st.success(f"Index ready — {chunk_count} chunks")
         files = st.session_state.get("session_files", [])
         if files:
@@ -358,13 +350,13 @@ with st.sidebar:
         st.session_state["confirm_clear"] = True
 
     if st.session_state.get("confirm_clear"):
-        st.warning("Delete all indexed documents?")
+        st.warning("Clear the in-memory index?")
         c1, c2 = st.columns(2)
         with c1:
             if st.button("Confirm", key="confirm_yes"):
-                clear_index(PERSIST_DIR)
-                st.session_state.pop("confirm_clear", None)
+                st.session_state.pop("vectorstore", None)
                 st.session_state.pop("session_files", None)
+                st.session_state.pop("confirm_clear", None)
                 st.rerun()
         with c2:
             if st.button("Cancel", key="confirm_no"):
@@ -372,7 +364,7 @@ with st.sidebar:
                 st.rerun()
 
 # ── Main area: Q&A ────────────────────────────────────────────────────────
-if not index_exists(PERSIST_DIR):
+if st.session_state.get("vectorstore") is None:
     st.info("Upload and index PDFs using the sidebar to get started.")
 else:
     question = st.text_input("Ask a question about your documents")
@@ -384,12 +376,16 @@ else:
 
     if st.session_state.get("query_running"):
         st.session_state["query_running"] = False
-        with st.spinner("Searching ChromaDB and generating answer…"):
+        with st.spinner("Searching FAISS and generating answer…"):
             try:
-                result = get_answer(st.session_state["last_question"], api_key=api_key)
+                result = get_answer(
+                    st.session_state["last_question"],
+                    vectorstore=st.session_state["vectorstore"],
+                    api_key=api_key,
+                )
                 st.markdown("### Answer")
                 st.markdown(result["answer"])
-                with st.expander("Sources — chunks retrieved from ChromaDB"):
+                with st.expander("Sources — chunks retrieved from FAISS"):
                     for i, chunk in enumerate(result["sources"], 1):
                         st.markdown(f"**Chunk {i}**")
                         st.text(chunk)
