@@ -4,7 +4,7 @@ import chromadb
 from langchain_community.document_loaders import PyPDFLoader
 from langchain_core.documents import Document
 from langchain_text_splitters import RecursiveCharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 from langchain_chroma import Chroma
 
 _COLLECTION = "langchain"
@@ -52,7 +52,7 @@ def build_index(
     persist_dir: str = "chroma_db",
     mode: str = "add",
 ) -> Chroma:
-    embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
     if isinstance(pdf_paths, str):
         pdf_paths = [pdf_paths]

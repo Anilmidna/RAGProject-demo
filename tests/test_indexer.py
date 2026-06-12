@@ -30,15 +30,17 @@ def test_index_exists_returns_false_for_missing_dir():
 
 
 def test_index_exists_returns_false_for_empty_dir():
-    with tempfile.TemporaryDirectory() as tmpdir:
+    # ignore_cleanup_errors=True: ChromaDB creates a SQLite file in the temp dir
+    # which Windows holds open; the assertion still runs before cleanup.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         assert index_exists(tmpdir) is False
 
 
-def test_index_exists_returns_true_when_dir_has_files():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        path = Path(tmpdir)
-        (path / "test.txt").write_text("")
-        assert index_exists(tmpdir) is True
+def test_index_exists_returns_false_when_no_collection():
+    # A non-empty directory with no ChromaDB collection → False
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        Path(tmpdir, "unrelated.txt").write_text("noise")
+        assert index_exists(tmpdir) is False
 
 
 def test_chunk_document_raises_for_missing_pdf():
@@ -46,53 +48,50 @@ def test_chunk_document_raises_for_missing_pdf():
         chunk_document("/nonexistent/file.pdf")
 
 
-def test_clear_index_removes_directory():
-    with tempfile.TemporaryDirectory() as tmpdir:
-        target = Path(tmpdir) / "chroma_test"
-        target.mkdir()
-        (target / "test.bin").write_bytes(b"data")
-        clear_index(str(target))
-        assert not target.exists()
-
-
-def test_clear_index_is_noop_for_missing_dir():
-    # should not raise even if directory does not exist
+def test_clear_index_does_not_raise_for_missing_dir():
+    # clear_index deletes the ChromaDB collection; it must never raise,
+    # even when the directory does not exist.
     clear_index("/nonexistent/path/xyz_does_not_exist_abc")
+
+
+def test_clear_index_leaves_dir_empty_of_collection():
+    # After clear_index, index_exists must return False for the same path.
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
+        clear_index(tmpdir)
+        assert index_exists(tmpdir) is False
 
 
 def test_build_index_accepts_list_of_paths():
     """build_index() should accept a list of PDF paths."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         persist = Path(tmpdir) / "db"
-        with patch("rag.indexer.OpenAIEmbeddings"), \
+        with patch("rag.indexer.OllamaEmbeddings"), \
              patch("rag.indexer.Chroma") as mock_chroma:
             mock_chroma.from_documents.return_value = MagicMock()
             build_index([PDF_PATH], persist_dir=str(persist), mode="replace")
             assert mock_chroma.from_documents.called
 
 
-def test_build_index_replace_mode_clears_existing_data():
-    """mode='replace' must wipe the persist_dir before re-indexing."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+def test_build_index_replace_mode_calls_clear_and_from_documents():
+    """mode='replace' must call clear_index then Chroma.from_documents."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         persist = Path(tmpdir) / "db"
-        persist.mkdir()
-        marker = persist / "old_data.bin"
-        marker.write_bytes(b"stale data")
-        with patch("rag.indexer.OpenAIEmbeddings"), \
-             patch("rag.indexer.Chroma") as mock_chroma:
+        with patch("rag.indexer.OllamaEmbeddings"), \
+             patch("rag.indexer.Chroma") as mock_chroma, \
+             patch("rag.indexer.clear_index") as mock_clear:
             mock_chroma.from_documents.return_value = MagicMock()
             build_index([PDF_PATH], persist_dir=str(persist), mode="replace")
-        assert not marker.exists()
+            mock_clear.assert_called_once_with(str(persist))
+            assert mock_chroma.from_documents.called
 
 
 def test_build_index_add_mode_calls_add_documents():
-    """mode='add' must call add_documents() on the existing vectorstore."""
-    with tempfile.TemporaryDirectory() as tmpdir:
+    """mode='add' must call add_documents() when an index already exists."""
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmpdir:
         persist = Path(tmpdir) / "db"
-        persist.mkdir()
-        (persist / "existing.bin").write_bytes(b"existing data")
         mock_vectorstore = MagicMock()
-        with patch("rag.indexer.OpenAIEmbeddings"), \
+        with patch("rag.indexer.OllamaEmbeddings"), \
+             patch("rag.indexer.index_exists", return_value=True), \
              patch("rag.indexer.Chroma") as mock_chroma:
             mock_chroma.return_value = mock_vectorstore
             build_index([PDF_PATH], persist_dir=str(persist), mode="add")

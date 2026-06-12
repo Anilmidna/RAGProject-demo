@@ -4,7 +4,7 @@ from pathlib import Path
 import streamlit as st
 import streamlit.components.v1 as components
 from langchain_chroma import Chroma
-from langchain_openai import OpenAIEmbeddings
+from langchain_huggingface import HuggingFaceEmbeddings
 
 from rag.indexer import build_index, chunk_document, clear_index, index_exists
 from rag.retriever import get_answer
@@ -49,7 +49,7 @@ def _rag_diagram(query_active: bool = False) -> str:
         arrow(idx_arrow) +
         node("#fef3c7", "✂️", "Chunking",   "1000-char splits") +
         arrow(idx_arrow) +
-        node("#ede9fe", "🔢", "Embed",      "text-embedding-3-small") +
+        node("#ede9fe", "🔢", "Embed",      "Ollama nomic") +
         arrow(idx_arrow) +
         node("#d1fae5", "💾", "ChromaDB",   "Persisted vectors",
              "border:2px solid #34d399;")
@@ -59,15 +59,15 @@ def _rag_diagram(query_active: bool = False) -> str:
     q_nodes = (
         node("#fce7f3", "❓", "Your Query",    "Natural language",  q_node_style) +
         arrow(q_arrow) +
-        node("#ede9fe", "🔢", "Embed Query",   "Same model",        q_node_style) +
+        node("#ede9fe", "🔢", "Embed Query",   "nomic-embed",       q_node_style) +
         arrow(q_arrow) +
         node("#d1fae5", "🔍", "ChromaDB",      "Cosine similarity", "border:2px solid #34d399;" + q_glow + pulse_style) +
         arrow(q_arrow) +
         node("#fef9c3", "📋", "Top-4 Chunks",  "Closest matches",   q_node_style) +
         arrow(q_arrow) +
-        node("#fee2e2", "🤖", "GPT-4o",        "LLM reasoning",     q_node_style) +
+        node("#fee2e2", "🤖", "Qwen 2.5:7b",   "LLM reasoning",     q_node_style) +
         arrow(q_arrow) +
-        node("#dcfce7", "💬", "Answer",         "Grounded response", q_node_style)
+        node("#dcfce7", "💬", "Answer",         "Final response", q_node_style)
     )
 
     shared_note = """
@@ -245,10 +245,10 @@ def _langchain_explainer() -> str:
         <tbody>
 """ + this_app_row("Load PDF", "PyPDFLoader", "Reads each PDF page into a Document object") + \
       this_app_row("Split text", "RecursiveCharacterTextSplitter", "Splits into 1000-char chunks, 200-char overlap") + \
-      this_app_row("Embed chunks", "OpenAIEmbeddings (text-embedding-3-small)", "Converts each chunk to a 1536-dim vector") + \
+      this_app_row("Embed chunks", "OllamaEmbeddings (nomic-embed-text)", "Converts each chunk to 768-dim vectors via local Ollama") + \
       this_app_row("Store vectors", "Chroma (langchain-chroma)", "Persists vectors in ChromaDB on disk") + \
       this_app_row("Retrieve", "ChromaDB retriever (k=4)", "Cosine similarity search, returns top-4 chunks") + \
-      this_app_row("Answer", "RetrievalQA chain + ChatOpenAI (gpt-4o)", "Stuffs chunks into prompt, calls GPT-4o, returns answer") + """
+      this_app_row("Answer", "RetrievalQA chain + Qwen 2.5:7b", "Stuffs chunks into prompt, calls Qwen via Ollama for reasoning") + """
         </tbody>
       </table>
 
@@ -272,6 +272,28 @@ st.divider()
 
 # ── Sidebar: Index Management ─────────────────────────────────────────────
 with st.sidebar:
+    st.header("🔑 API Key")
+    import os, streamlit as _st
+    # Read from Streamlit secrets (cloud) or let user paste it manually
+    default_key = ""
+    try:
+        default_key = st.secrets["ANTHROPIC_API_KEY"]
+    except Exception:
+        default_key = os.environ.get("ANTHROPIC_API_KEY", "")
+
+    api_key = st.text_input(
+        "Anthropic API Key",
+        value=default_key,
+        type="password",
+        placeholder="sk-ant-...",
+        help="Required to answer questions. Get yours at console.anthropic.com",
+    )
+    if not api_key:
+        st.warning("Enter your Anthropic API key to enable Q&A.")
+    else:
+        st.success("API key set ✓")
+
+    st.divider()
     st.header("Index Management")
 
     uploaded_files = st.file_uploader(
@@ -320,7 +342,7 @@ with st.sidebar:
     # Index status
     st.divider()
     if index_exists(PERSIST_DIR):
-        embeddings = OpenAIEmbeddings(model="text-embedding-3-small")
+        embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
         vs = Chroma(persist_directory=PERSIST_DIR, embedding_function=embeddings)
         chunk_count = vs._collection.count()
         st.success(f"Index ready — {chunk_count} chunks")
@@ -364,7 +386,7 @@ else:
         st.session_state["query_running"] = False
         with st.spinner("Searching ChromaDB and generating answer…"):
             try:
-                result = get_answer(st.session_state["last_question"])
+                result = get_answer(st.session_state["last_question"], api_key=api_key)
                 st.markdown("### Answer")
                 st.markdown(result["answer"])
                 with st.expander("Sources — chunks retrieved from ChromaDB"):

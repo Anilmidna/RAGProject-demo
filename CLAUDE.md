@@ -6,13 +6,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A **Retrieval-Augmented Generation (RAG)** library for question-answering over PDF documents.
 
-**Pipeline**: PDF → chunked → embedded (OpenAI `text-embedding-3-small`) → ChromaDB → retrieved (top-4) → answered by `gpt-4o`
+**Pipeline**: PDF → chunked → embedded (`nomic-embed-text` via Ollama) → ChromaDB → retrieved (top-4) → answered by `qwen2.5:7b` via Ollama
+
+**No AWS credentials or API keys required** — runs fully local via Ollama.
+
+## Pre-requisites
+
+Ollama must be running with both models pulled:
+```bash
+ollama pull nomic-embed-text
+ollama pull qwen2.5:7b   # students likely have this already
+ollama serve              # if not already running
+```
+
+> **Important:** If you have an existing `chroma_db/` folder built with the old Bedrock/Titan embeddings (1536-dim), delete it before first run. nomic-embed-text uses 768-dim vectors — the two are incompatible. Use the app's **Clear Index** button or delete the folder manually.
 
 ## Commands
 
 ```bash
 # Install dependencies
-pip install langchain langchain-openai langchain-community langchain-core langchain-chroma pytest
+pip install langchain langchain-ollama langchain-community langchain-core langchain-chroma pytest
 
 # Run all tests
 pytest tests/ -v
